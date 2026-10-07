@@ -1,6 +1,16 @@
 import React, { useRef, useState } from 'react';
 import type { PhotoMission, MissionState } from '../types';
-import { Camera, Check, Star, Sparkles, Trash2, Maximize2, AlertCircle } from 'lucide-react';
+import {
+  Camera,
+  Check,
+  Star,
+  Sparkles,
+  Trash2,
+  Maximize2,
+  AlertCircle,
+  ImagePlus,
+  Save,
+} from 'lucide-react';
 import confetti from 'canvas-confetti';
 
 interface PhotoHuntTabProps {
@@ -8,56 +18,110 @@ interface PhotoHuntTabProps {
   missionStates: Record<number, MissionState>;
   onUpdateMission: (missionId: number, update: Partial<MissionState>) => void;
   onOpenPhotoPreview: (dataUrl: string, title: string) => void;
+  dailyNote: string;
+  onDailyNoteChange: (note: string) => void;
+  onSaveDailyNote: () => Promise<void>;
+  isSavingJournal: boolean;
 }
+
+const readFileAsDataUrl = (file: File): Promise<string> =>
+  new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result as string);
+    reader.onerror = () => reject(reader.error);
+    reader.readAsDataURL(file);
+  });
+
+const getPhotos = (state: MissionState): string[] => {
+  if (Array.isArray(state.photos)) return state.photos;
+  if (state.photoDataUrl) return [state.photoDataUrl];
+  return [];
+};
+
+const getPhotoUrls = (state: MissionState): string[] => {
+  if (Array.isArray(state.photoUrls)) return state.photoUrls;
+  if (state.photoUrl) return [state.photoUrl];
+  return [];
+};
 
 export const PhotoHuntTab: React.FC<PhotoHuntTabProps> = ({
   missions,
   missionStates,
   onUpdateMission,
   onOpenPhotoPreview,
+  dailyNote,
+  onDailyNoteChange,
+  onSaveDailyNote,
+  isSavingJournal,
 }) => {
   const [filter, setFilter] = useState<'all' | 'pending' | 'completed'>('all');
-  const fileInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const cameraInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
+  const galleryInputRefs = useRef<Record<number, HTMLInputElement | null>>({});
 
-  const handleFileChange = (missionId: number, e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file) return;
+  const addFiles = async (missionId: number, files: FileList | null) => {
+    if (!files?.length) return;
 
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result as string;
-      const current = missionStates[missionId] || { missionId, completed: false, stars: 0 };
-      
-      // Auto upgrade stars to at least 2 when photo is captured, or 3 if user previously picked 3
-      const newStars = current.stars >= 2 ? current.stars : 2;
-
-      onUpdateMission(missionId, {
-        photoDataUrl: result,
-        stars: newStars,
-        completed: true,
-        timestamp: new Date().toISOString(),
-      });
-
-      // Fire celebratory confetti!
-      confetti({
-        particleCount: 50,
-        spread: 60,
-        origin: { y: 0.7 },
-        colors: ['#f59e0b', '#ef4444', '#10b981', '#3b82f6'],
-      });
+    const current = missionStates[missionId] || {
+      missionId,
+      completed: false,
+      stars: 0,
     };
-    reader.readAsDataURL(file);
-    // Reset file input so same file could be selected again if desired
+
+    const oldPhotos = getPhotos(current);
+    const oldUrls = getPhotoUrls(current);
+    const newPhotos = await Promise.all(Array.from(files).map(readFileAsDataUrl));
+    const nextPhotos = [...oldPhotos, ...newPhotos];
+    const nextPhotoUrls = [
+      ...oldUrls,
+      ...Array.from({ length: newPhotos.length }, () => ''),
+    ];
+
+    const newStars = current.stars >= 2 ? current.stars : 2;
+
+    onUpdateMission(missionId, {
+      photos: nextPhotos,
+      photoUrls: nextPhotoUrls,
+      photoDataUrl: undefined,
+      photoUrl: undefined,
+      stars: newStars,
+      completed: true,
+      timestamp: new Date().toISOString(),
+    });
+
+    confetti({
+      particleCount: 50,
+      spread: 60,
+      origin: { y: 0.7 },
+    });
+  };
+
+  const handleCameraChange = async (
+    missionId: number,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    await addFiles(missionId, e.target.files);
+    e.target.value = '';
+  };
+
+  const handleGalleryChange = async (
+    missionId: number,
+    e: React.ChangeEvent<HTMLInputElement>
+  ) => {
+    await addFiles(missionId, e.target.files);
     e.target.value = '';
   };
 
   const handleStarSelect = (missionId: number, stars: number) => {
-    const current = missionStates[missionId] || { missionId, completed: false, stars: 0 };
-    const isNowCompleted = stars > 0;
-    
+    const current = missionStates[missionId] || {
+      missionId,
+      completed: false,
+      stars: 0,
+    };
+
     onUpdateMission(missionId, {
       stars,
-      completed: isNowCompleted,
+      completed: stars > 0,
+      timestamp: new Date().toISOString(),
     });
 
     if (stars === 3 || (current.stars === 0 && stars > 0)) {
@@ -69,20 +133,37 @@ export const PhotoHuntTab: React.FC<PhotoHuntTabProps> = ({
     }
   };
 
-  const handleRemovePhoto = (missionId: number) => {
+  const handleRemovePhoto = (missionId: number, index: number) => {
     const current = missionStates[missionId];
     if (!current) return;
+
+    const photos = getPhotos(current);
+    const photoUrls = getPhotoUrls(current);
+
+    const nextPhotos = photos.filter((_, i) => i !== index);
+    const nextPhotoUrls = photoUrls.filter((_, i) => i !== index);
+
     onUpdateMission(missionId, {
+      photos: nextPhotos,
+      photoUrls: nextPhotoUrls,
       photoDataUrl: undefined,
-      photoUrl: undefined,
-      stars: current.stars > 1 ? 1 : current.stars, // Downgrade to 1 star if still marked found
+      photoUrl: nextPhotoUrls[0],
+      stars: nextPhotos.length === 0 && current.stars > 1 ? 1 : current.stars,
+      completed: current.stars > 0 || nextPhotos.length > 0,
+      timestamp: new Date().toISOString(),
     });
   };
 
-  // Filter missions
+  const handleNoteChange = (missionId: number, notes: string) => {
+    onUpdateMission(missionId, {
+      notes,
+      timestamp: new Date().toISOString(),
+    });
+  };
+
   const filteredMissions = missions.filter((m) => {
     const state = missionStates[m.id];
-    const isCompleted = state?.completed || (state?.stars && state.stars > 0);
+    const isCompleted = !!state?.completed || (state?.stars || 0) > 0;
     if (filter === 'completed') return isCompleted;
     if (filter === 'pending') return !isCompleted;
     return true;
@@ -90,226 +171,269 @@ export const PhotoHuntTab: React.FC<PhotoHuntTabProps> = ({
 
   return (
     <div className="space-y-4">
-      {/* Star Scoring Rule Explainer Card */}
-      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200/80 rounded-2xl p-3.5 shadow-xs">
+      <div className="bg-gradient-to-br from-amber-50 to-orange-50 border border-amber-200 rounded-2xl p-3.5">
         <div className="flex items-center gap-1.5 text-xs font-bold text-amber-900 mb-2">
           <Sparkles className="w-4 h-4 text-amber-600" />
-          <span>กติกาการให้ดาว (เข้าใจง่ายสำหรับลูก 6 ขวบ):</span>
+          <span>⭐ กติกา</span>
         </div>
+
         <div className="grid grid-cols-3 gap-2 text-center text-xs">
-          <div className="bg-white/80 p-2 rounded-xl border border-amber-200/50">
-            <div className="text-amber-500 font-bold flex justify-center mb-0.5">⭐ 1 ดาว</div>
-            <div className="text-slate-600 text-[11px] leading-tight">หาเจอภารกิจ</div>
+          <div className="bg-white/80 p-2 rounded-xl border border-amber-200">
+            <div className="font-bold">⭐ 1</div>
+            <div className="text-[11px]">หาเจอ</div>
           </div>
-          <div className="bg-white/80 p-2 rounded-xl border border-amber-200/50">
-            <div className="text-amber-500 font-bold flex justify-center mb-0.5">⭐⭐ 2 ดาว</div>
-            <div className="text-slate-600 text-[11px] leading-tight">หาเจอ + ถ่ายรูป</div>
+          <div className="bg-white/80 p-2 rounded-xl border border-amber-200">
+            <div className="font-bold">⭐⭐ 2</div>
+            <div className="text-[11px]">ถ่ายรูป</div>
           </div>
-          <div className="bg-amber-100/80 p-2 rounded-xl border border-amber-300">
-            <div className="text-orange-600 font-bold flex justify-center mb-0.5">⭐⭐⭐ 3 ดาว</div>
-            <div className="text-orange-950 font-semibold text-[11px] leading-tight">ลูกถ่ายรูปเอง!</div>
+          <div className="bg-amber-100 p-2 rounded-xl border border-amber-300">
+            <div className="font-bold">⭐⭐⭐ 3</div>
+            <div className="text-[11px]">ลูกถ่ายเอง</div>
           </div>
         </div>
       </div>
 
-      {/* Filter Tabs */}
-      <div className="flex items-center justify-between gap-1 bg-white p-1 rounded-2xl border border-slate-200/80 text-xs">
+      <div className="bg-white rounded-2xl border border-slate-200 p-3.5">
+        <div className="flex items-center justify-between gap-2 mb-2">
+          <div>
+            <div className="font-bold text-sm text-slate-800">💛 วันนี้เป็นยังไง?</div>
+            <div className="text-[11px] text-slate-500">เขียนสั้น ๆ ไว้ดูทีหลัง</div>
+          </div>
+          <button
+            onClick={onSaveDailyNote}
+            disabled={isSavingJournal}
+            className="px-3 py-2 rounded-xl bg-amber-500 text-white text-xs font-bold flex items-center gap-1.5 disabled:opacity-60"
+          >
+            <Save className="w-3.5 h-3.5" />
+            {isSavingJournal ? 'กำลังบันทึก' : 'บันทึก'}
+          </button>
+        </div>
+
+        <textarea
+          value={dailyNote}
+          onChange={(e) => onDailyNoteChange(e.target.value)}
+          placeholder="วันนี้ชอบอะไรที่สุด?"
+          rows={3}
+          className="w-full resize-none bg-amber-50/60 border border-amber-200 rounded-xl p-3 text-sm text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-1 bg-white p-1 rounded-2xl border border-slate-200 text-xs">
         <button
           onClick={() => setFilter('all')}
-          className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer ${
-            filter === 'all'
-              ? 'bg-amber-500 text-white font-bold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
+          className={`flex-1 py-1.5 px-2 rounded-xl ${
+            filter === 'all' ? 'bg-amber-500 text-white font-bold' : 'text-slate-600'
           }`}
         >
           ทั้งหมด ({missions.length})
         </button>
         <button
           onClick={() => setFilter('pending')}
-          className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer ${
-            filter === 'pending'
-              ? 'bg-amber-500 text-white font-bold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
+          className={`flex-1 py-1.5 px-2 rounded-xl ${
+            filter === 'pending' ? 'bg-amber-500 text-white font-bold' : 'text-slate-600'
           }`}
         >
           ยังไม่ทำ ({missions.filter((m) => !(missionStates[m.id]?.stars > 0)).length})
         </button>
         <button
           onClick={() => setFilter('completed')}
-          className={`flex-1 py-1.5 px-2 rounded-xl font-medium transition-all cursor-pointer ${
-            filter === 'completed'
-              ? 'bg-emerald-600 text-white font-bold shadow-xs'
-              : 'text-slate-600 hover:text-slate-900'
+          className={`flex-1 py-1.5 px-2 rounded-xl ${
+            filter === 'completed' ? 'bg-emerald-600 text-white font-bold' : 'text-slate-600'
           }`}
         >
-          สำเร็จแล้ว ({missions.filter((m) => missionStates[m.id]?.stars > 0).length})
+          ทำแล้ว ({missions.filter((m) => missionStates[m.id]?.stars > 0).length})
         </button>
       </div>
 
-      {/* Missions List */}
       <div className="space-y-3.5">
         {filteredMissions.map((mission) => {
-          const state = missionStates[mission.id] || { missionId: mission.id, completed: false, stars: 0 };
+          const state = missionStates[mission.id] || {
+            missionId: mission.id,
+            completed: false,
+            stars: 0,
+          };
+
+          const photos = getPhotos(state);
+          const photoUrls = getPhotoUrls(state);
           const isCompleted = state.stars > 0 || state.completed;
-          const photoUrl = state.photoDataUrl || state.photoUrl;
 
           return (
             <div
               key={mission.id}
-              className={`rounded-2xl transition-all duration-200 border overflow-hidden ${
+              className={`rounded-2xl border overflow-hidden ${
                 isCompleted
-                  ? 'bg-white border-emerald-300 shadow-sm'
-                  : 'bg-white border-amber-200/70 shadow-xs'
+                  ? 'bg-white border-emerald-300'
+                  : 'bg-white border-amber-200'
               }`}
             >
-              {/* Mission Card Header */}
               <div
                 className={`p-3.5 flex items-center justify-between border-b ${
                   isCompleted
                     ? 'bg-emerald-50/60 border-emerald-100'
-                    : 'bg-amber-50/50 border-amber-100/60'
+                    : 'bg-amber-50/50 border-amber-100'
                 }`}
               >
-                <div className="flex items-center gap-2.5">
-                  <span className="text-2xl drop-shadow-xs">{mission.icon}</span>
-                  <div>
-                    <div className="flex items-center gap-1.5">
-                      <span className="text-xs font-bold text-slate-500">
-                        {mission.isBonus ? '🏆 ภารกิจพิเศษ' : `⭐ #${mission.id}`}
-                      </span>
-                      {mission.isBonus && (
-                        <span className="text-[10px] bg-rose-500 text-white font-bold px-1.5 py-0.2 rounded-full">
-                          +1 Bonus Star
-                        </span>
-                      )}
+                <div className="flex items-center gap-2.5 min-w-0">
+                  <span className="text-2xl">{mission.icon}</span>
+                  <div className="min-w-0">
+                    <div className="text-xs font-bold text-slate-500">
+                      {mission.isBonus ? '🏆 Bonus' : `#${mission.id}`}
                     </div>
                     <h3 className="font-bold text-slate-900 text-sm">{mission.title}</h3>
                   </div>
                 </div>
 
                 {isCompleted && (
-                  <div className="inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-xs font-bold px-2.5 py-1 rounded-full border border-emerald-300">
+                  <div className="shrink-0 inline-flex items-center gap-1 bg-emerald-100 text-emerald-800 text-xs font-bold px-2 py-1 rounded-full">
                     <Check className="w-3.5 h-3.5" />
-                    <span>สำเร็จ</span>
+                    <span>ทำแล้ว</span>
                   </div>
                 )}
               </div>
 
               <div className="p-4 space-y-3">
-                {/* 🔎 Hint Box */}
-                <div className="bg-amber-50/80 rounded-xl p-3 border border-amber-200/60 flex items-start gap-2.5 text-xs text-amber-950">
-                  <span className="text-base shrink-0 mt-[-2px]">🔎</span>
-                  <div className="leading-relaxed">
-                    <span className="font-bold text-amber-900">คำใบ้: </span>
+                <div className="bg-amber-50 rounded-xl p-3 border border-amber-200 flex items-start gap-2 text-xs text-amber-950">
+                  <span>🔎</span>
+                  <div>
+                    <span className="font-bold">หา: </span>
                     <span>{mission.hint}</span>
                   </div>
                 </div>
 
-                {/* Uploaded Photo Preview (if present) */}
-                {photoUrl ? (
-                  <div className="relative rounded-xl overflow-hidden border border-slate-200 bg-slate-900 group">
-                    <img
-                      src={photoUrl}
-                      alt={mission.title}
-                      className="w-full h-48 object-cover cursor-pointer hover:opacity-90 transition-opacity"
-                      onClick={() => onOpenPhotoPreview(photoUrl, mission.title)}
-                    />
-                    <div className="absolute bottom-2 left-2 right-2 flex items-center justify-between pointer-events-auto">
-                      <button
-                        onClick={() => onOpenPhotoPreview(photoUrl, mission.title)}
-                        className="bg-black/60 hover:bg-black/80 backdrop-blur-md text-white text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer"
-                      >
-                        <Maximize2 className="w-3 h-3" /> ดูรูปใหญ่
-                      </button>
+                {photos.length > 0 ? (
+                  <div>
+                    <div className="grid grid-cols-2 gap-2">
+                      {photos.map((photo, index) => {
+                        const displayUrl = photo || photoUrls[index];
+                        if (!displayUrl) return null;
 
-                      <div className="flex items-center gap-1.5">
-                        <button
-                          onClick={() => fileInputRefs.current[mission.id]?.click()}
-                          className="bg-amber-500 hover:bg-amber-600 text-white text-xs px-2.5 py-1 rounded-lg flex items-center gap-1 cursor-pointer font-medium"
-                        >
-                          <Camera className="w-3 h-3" /> ถ่ายใหม่
-                        </button>
-                        <button
-                          onClick={() => handleRemovePhoto(mission.id)}
-                          className="bg-rose-500/90 hover:bg-rose-600 text-white text-xs p-1.5 rounded-lg flex items-center justify-center cursor-pointer"
-                          title="ลบรูป"
-                        >
-                          <Trash2 className="w-3 h-3" />
-                        </button>
-                      </div>
+                        return (
+                          <div
+                            key={`${mission.id}-${index}`}
+                            className="relative aspect-square rounded-xl overflow-hidden bg-slate-900 border border-slate-200"
+                          >
+                            <img
+                              src={displayUrl}
+                              alt={`${mission.title} ${index + 1}`}
+                              className="w-full h-full object-cover cursor-pointer"
+                              onClick={() => onOpenPhotoPreview(displayUrl, mission.title)}
+                            />
+
+                            <div className="absolute left-1.5 right-1.5 bottom-1.5 flex justify-between gap-1">
+                              <button
+                                onClick={() => onOpenPhotoPreview(displayUrl, mission.title)}
+                                className="bg-black/60 text-white p-1.5 rounded-lg"
+                                aria-label="ดูรูป"
+                              >
+                                <Maximize2 className="w-3.5 h-3.5" />
+                              </button>
+
+                              <button
+                                onClick={() => handleRemovePhoto(mission.id, index)}
+                                className="bg-rose-500 text-white p-1.5 rounded-lg"
+                                aria-label="ลบรูป"
+                              >
+                                <Trash2 className="w-3.5 h-3.5" />
+                              </button>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    <div className="text-[11px] text-slate-500 mt-2">
+                      {photos.length} รูป • แตะรูปเพื่อดูใหญ่
                     </div>
                   </div>
                 ) : (
-                  /* Photo capture action button */
-                  <div className="flex gap-2">
-                    <button
-                      onClick={() => fileInputRefs.current[mission.id]?.click()}
-                      className="flex-1 py-2.5 px-3 rounded-xl bg-gradient-to-r from-orange-500 to-amber-500 hover:from-orange-600 hover:to-amber-600 text-white font-bold text-xs flex items-center justify-center gap-2 shadow-xs active:scale-98 transition-all cursor-pointer"
-                    >
-                      <Camera className="w-4 h-4" />
-                      <span>ถ่ายรูป / อัปโหลด</span>
-                    </button>
+                  <div className="bg-slate-50 rounded-xl border border-dashed border-slate-300 p-4 text-center text-xs text-slate-500">
+                    ยังไม่มีรูป
                   </div>
                 )}
 
-                {/* Hidden File Input with camera capture option */}
+                <div className="grid grid-cols-2 gap-2">
+                  <button
+                    onClick={() => cameraInputRefs.current[mission.id]?.click()}
+                    className="py-2.5 rounded-xl bg-orange-500 text-white font-bold text-xs flex items-center justify-center gap-1.5"
+                  >
+                    <Camera className="w-4 h-4" />
+                    ถ่ายรูป
+                  </button>
+
+                  <button
+                    onClick={() => galleryInputRefs.current[mission.id]?.click()}
+                    className="py-2.5 rounded-xl bg-slate-100 text-slate-800 font-bold text-xs flex items-center justify-center gap-1.5 border border-slate-200"
+                  >
+                    <ImagePlus className="w-4 h-4" />
+                    เลือกรูป
+                  </button>
+                </div>
+
                 <input
                   ref={(el) => {
-                    fileInputRefs.current[mission.id] = el;
+                    cameraInputRefs.current[mission.id] = el;
                   }}
                   type="file"
                   accept="image/*"
                   capture="environment"
                   className="hidden"
-                  onChange={(e) => handleFileChange(mission.id, e)}
+                  onChange={(e) => void handleCameraChange(mission.id, e)}
                 />
 
-                {/* ⭐ Star Rating Selector */}
+                <input
+                  ref={(el) => {
+                    galleryInputRefs.current[mission.id] = el;
+                  }}
+                  type="file"
+                  accept="image/*"
+                  multiple
+                  className="hidden"
+                  onChange={(e) => void handleGalleryChange(mission.id, e)}
+                />
+
                 <div className="pt-2 border-t border-slate-100">
                   <div className="flex items-center justify-between mb-2">
-                    <span className="text-xs font-semibold text-slate-700">
-                      ระดับดาวที่ได้รับ:
-                    </span>
+                    <span className="text-xs font-bold text-slate-700">⭐ ดาว</span>
                     <span className="text-xs font-bold text-amber-600">
                       {state.stars === 3
-                        ? '⭐⭐⭐ 3 ดาว (ลูกถ่ายเอง!)'
+                        ? '⭐⭐⭐ ลูกถ่ายเอง'
                         : state.stars === 2
-                        ? '⭐⭐ 2 ดาว (ถ่ายรูปสำเร็จ)'
-                        : state.stars === 1
-                        ? '⭐ 1 ดาว (หาเจอภารกิจ)'
-                        : 'ยังไม่ได้เลือกดาว'}
+                          ? '⭐⭐ ถ่ายรูป'
+                          : state.stars === 1
+                            ? '⭐ หาเจอ'
+                            : 'ยังไม่เลือก'}
                     </span>
                   </div>
 
                   {mission.isBonus ? (
-                    /* Bonus Star toggle */
                     <button
                       onClick={() => handleStarSelect(mission.id, state.stars === 1 ? 0 : 1)}
-                      className={`w-full py-2 px-3 rounded-xl text-xs font-bold flex items-center justify-center gap-2 transition-all cursor-pointer border ${
+                      className={`w-full py-2 rounded-xl text-xs font-bold border ${
                         state.stars === 1
-                          ? 'bg-amber-500 text-white border-amber-600 shadow-xs'
-                          : 'bg-amber-50 text-amber-800 border-amber-200 hover:bg-amber-100'
+                          ? 'bg-amber-500 text-white border-amber-600'
+                          : 'bg-amber-50 text-amber-800 border-amber-200'
                       }`}
                     >
-                      <Star className={`w-4 h-4 ${state.stars === 1 ? 'fill-yellow-200 text-yellow-200' : ''}`} />
-                      <span>{state.stars === 1 ? '🏆 ได้รับ Bonus (+1 ดาว) แล้ว' : 'กดรับ Bonus (+1 ดาว)'}</span>
+                      {state.stars === 1 ? '🏆 ได้ Bonus แล้ว' : '🏆 รับ Bonus +1'}
                     </button>
                   ) : (
-                    /* 1 / 2 / 3 Star Buttons */
                     <div className="grid grid-cols-3 gap-2">
                       {[1, 2, 3].map((starNum) => {
                         const isSelected = state.stars === starNum;
+
                         return (
                           <button
                             key={starNum}
-                            onClick={() => handleStarSelect(mission.id, isSelected ? 0 : starNum)}
-                            className={`py-2 px-1.5 rounded-xl text-xs font-medium transition-all cursor-pointer border flex flex-col items-center gap-0.5 ${
+                            onClick={() =>
+                              handleStarSelect(mission.id, isSelected ? 0 : starNum)
+                            }
+                            className={`py-2 px-1 rounded-xl border flex flex-col items-center gap-0.5 ${
                               isSelected
-                                ? 'bg-amber-500 text-white border-amber-600 shadow-xs font-bold'
-                                : 'bg-slate-50 text-slate-700 border-slate-200 hover:bg-amber-50 hover:border-amber-200'
+                                ? 'bg-amber-500 text-white border-amber-600'
+                                : 'bg-slate-50 text-slate-700 border-slate-200'
                             }`}
                           >
-                            <div className="flex items-center gap-0.5">
+                            <div className="flex">
                               {Array.from({ length: starNum }).map((_, i) => (
                                 <Star
                                   key={i}
@@ -322,7 +446,7 @@ export const PhotoHuntTab: React.FC<PhotoHuntTabProps> = ({
                               ))}
                             </div>
                             <span className="text-[10px]">
-                              {starNum === 1 ? 'หาเจอ' : starNum === 2 ? 'ถ่ายรูปได้' : 'ลูกถ่ายเอง!'}
+                              {starNum === 1 ? 'หาเจอ' : starNum === 2 ? 'ถ่ายรูป' : 'ลูกถ่ายเอง'}
                             </span>
                           </button>
                         );
@@ -330,16 +454,28 @@ export const PhotoHuntTab: React.FC<PhotoHuntTabProps> = ({
                     </div>
                   )}
                 </div>
+
+                <div className="pt-2 border-t border-slate-100">
+                  <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                    📝 โน้ต
+                  </label>
+                  <textarea
+                    value={state.notes || ''}
+                    onChange={(e) => handleNoteChange(mission.id, e.target.value)}
+                    placeholder="ชอบอะไร? สนุกไหม?"
+                    rows={2}
+                    className="w-full resize-none bg-slate-50 border border-slate-200 rounded-xl p-2.5 text-xs text-slate-800 outline-none focus:ring-2 focus:ring-amber-400"
+                  />
+                </div>
               </div>
             </div>
           );
         })}
 
         {filteredMissions.length === 0 && (
-          <div className="text-center py-12 bg-white rounded-2xl border border-slate-200 p-6">
+          <div className="text-center py-10 bg-white rounded-2xl border border-slate-200 p-6">
             <AlertCircle className="w-10 h-10 text-slate-300 mx-auto mb-2" />
-            <p className="text-sm font-semibold text-slate-700">ไม่พบภารกิจในหมวดนี้</p>
-            <p className="text-xs text-slate-400 mt-1">ลองเปลี่ยนตัวกรองเป็น "ทั้งหมด"</p>
+            <p className="text-sm font-bold text-slate-700">ไม่เจอ</p>
           </div>
         )}
       </div>
