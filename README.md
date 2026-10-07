@@ -93,3 +93,38 @@ VITE_SUPABASE_URL=https://xjqpfmcgxvvsnvyjxrac.supabase.co
 VITE_SUPABASE_ANON_KEY=your-anon-key-here
 ```
 3. กดปุ่ม **"ซิงค์ขึ้น Cloud"** เพื่อสำรองรูปและคะแนนทั้งหมดขึ้น Supabase ได้ทันที!
+
+# Phitsanulok 2026 update
+
+Replace these files in the GitHub repo:
+
+- src/App.tsx
+- src/types/index.ts
+- src/lib/db.ts
+- src/lib/supabase.ts
+- src/components/PhotoHuntTab.tsx
+- src/components/VictoryModal.tsx
+- src/components/PlacesTab.tsx
+- src/data/missions.ts
+
+Supabase:
+1. Run `supabase/migration_multi_photo_journal.sql` once in Supabase SQL Editor.
+2. `supabase/schema.sql` is the full updated schema for future setup.
+
+What changed:
+- More than 1 photo per mission.
+- Camera photo and Gallery selection are separate buttons.
+- Gallery supports selecting multiple photos at once.
+- Photos can be added or deleted later.
+- Stars can be changed later.
+- Each mission has a short note.
+- A daily memory note can be saved.
+- Daily note and mission notes sync to Supabase.
+- Local photos stay in IndexedDB for offline use.
+- Child-facing labels are shorter and simpler.
+
+Important:
+- Existing v1 IndexedDB photo records are read automatically.
+- Existing Supabase data is preserved.
+- The migration adds `photo_urls` and `trip_journal`.
+
