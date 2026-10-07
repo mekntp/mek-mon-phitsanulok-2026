@@ -22,11 +22,18 @@ export interface PhotoMission {
 export interface MissionState {
   missionId: number;
   completed: boolean;
-  stars: number; // 0, 1, 2, 3 (or 1 if bonus)
-  photoDataUrl?: string; // stored in IndexedDB or Base64
-  photoUrl?: string; // remote Supabase URL
+  stars: number;
+  photos?: string[];
+  photoUrls?: string[];
+  photoDataUrl?: string;
+  photoUrl?: string;
   timestamp?: string;
   notes?: string;
+}
+
+export interface TripJournal {
+  note: string;
+  updatedAt?: string;
 }
 
 export interface RankInfo {
