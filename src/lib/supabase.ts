@@ -23,9 +23,14 @@ export function getStoredSupabaseConfig(): SupabaseConfig {
   const localUrl = localStorage.getItem('supabase_url');
   const localKey = localStorage.getItem('supabase_anon_key');
 
+  const rawUrl = localUrl || envUrl || DEFAULT_SUPABASE_URL;
+  const rawKey = localKey || envKey || '';
+
+  const clean = (val: string) => val.replace(/^<|>$/g, '').trim();
+
   return {
-    url: localUrl || envUrl || DEFAULT_SUPABASE_URL,
-    anonKey: localKey || envKey || '',
+    url: clean(rawUrl),
+    anonKey: clean(rawKey),
   };
 }
 
