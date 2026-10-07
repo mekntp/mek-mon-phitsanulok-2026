@@ -43,14 +43,10 @@ let cachedClient: SupabaseClient | null = null;
 
 export function getSupabaseClient(): SupabaseClient | null {
   const { url, anonKey } = getStoredSupabaseConfig();
-  if (!url || !anonKey) {
-    return null;
-  }
+  if (!url || !anonKey) return null;
 
   try {
-    if (!cachedClient) {
-      cachedClient = createClient(url, anonKey);
-    }
+    if (!cachedClient) cachedClient = createClient(url, anonKey);
     return cachedClient;
   } catch (err) {
     console.error('Failed to initialize Supabase client:', err);
@@ -62,22 +58,20 @@ export function resetSupabaseClient() {
   cachedClient = null;
 }
 
-/**
- * Upload a photo to Supabase Storage bucket 'trip-photos'
- */
 export async function uploadPhotoToSupabase(
   missionId: number,
-  dataUrl: string
+  dataUrl: string,
+  photoIndex = 0
 ): Promise<string | null> {
   const supabase = getSupabaseClient();
   if (!supabase) return null;
 
   try {
-    // Convert dataUrl to blob
     const res = await fetch(dataUrl);
     const blob = await res.blob();
     const ext = blob.type.includes('png') ? 'png' : 'jpg';
-    const filePath = `missions/mission_${missionId}_${Date.now()}.${ext}`;
+    const filePath =
+      `missions/mission_${missionId}_${Date.now()}_${photoIndex}.${ext}`;
 
     const { error: uploadError } = await supabase.storage
       .from('trip-photos')
@@ -102,14 +96,12 @@ export async function uploadPhotoToSupabase(
   }
 }
 
-/**
- * Sync mission progress record to Supabase table 'photo_missions'
- */
 export async function syncMissionToSupabase(
   missionId: number,
   stars: number,
-  photoUrl?: string,
-  completed?: boolean
+  photoUrls: string[] = [],
+  completed = stars > 0,
+  notes = ''
 ): Promise<boolean> {
   const supabase = getSupabaseClient();
   if (!supabase) return false;
@@ -119,8 +111,10 @@ export async function syncMissionToSupabase(
       {
         mission_id: missionId,
         stars,
-        photo_url: photoUrl,
-        completed: completed ?? stars > 0,
+        photo_urls: photoUrls,
+        photo_url: photoUrls[0] || null,
+        notes,
+        completed,
         updated_at: new Date().toISOString(),
       },
       { onConflict: 'mission_id' }
@@ -133,6 +127,31 @@ export async function syncMissionToSupabase(
     return true;
   } catch (err) {
     console.warn('Failed to sync mission to Supabase table:', err);
+    return false;
+  }
+}
+
+export async function syncTripJournalToSupabase(note: string): Promise<boolean> {
+  const supabase = getSupabaseClient();
+  if (!supabase) return false;
+
+  try {
+    const { error } = await supabase.from('trip_journal').upsert(
+      {
+        id: 1,
+        note,
+        updated_at: new Date().toISOString(),
+      },
+      { onConflict: 'id' }
+    );
+
+    if (error) {
+      console.warn('Supabase journal sync error:', error);
+      return false;
+    }
+    return true;
+  } catch (err) {
+    console.warn('Failed to sync trip journal:', err);
     return false;
   }
 }
